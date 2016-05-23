@@ -1,0 +1,348 @@
+<!doctype html>
+<html>
+
+<head>
+    <title> Bluff </title>
+    <style>
+		img{
+			position: absolute;
+		}
+		#messages {list-style-type: none; padding: 0; margin: 0;}
+		#messages li:nth-child(odd){background: #eee;}
+		#self{
+			width:100%;
+		}
+		#chatwindow{
+			position: absolute;
+			height: 280px;
+			width: 250px;
+			bottom: 0;
+		}
+		#messagewindow, #inputwindow{
+			position: absolute;
+			left:0;
+			right:0;
+			height:250px;
+			border:1px solid #000;
+		}
+		#messagewindow{
+			overflow-y: auto;
+			word-wrap: break-word;
+			top: 30px;
+			bottom: 3em;
+		}
+		#inputwindow{
+			display:block;
+			bottom:0;
+			height:1em;
+			padding:.5em;
+			margin-top:1em;
+		}
+		#mycards{
+			position: absolute;
+			display: block;
+			height: 250px;
+			float: right;
+			bottom: 0;
+			left: 260px;
+			right: 0;
+			border: 1px solid #000;
+		}
+		#playarea{
+			position:absolute;
+			display:block;
+			height: 250px;
+			bottom: 260px;
+			left: 260px;
+			right: 260px;
+			border: 1px solid #000;
+		}
+		.dragged{
+			position: absolute;
+			width: 120px;
+			opacity: 0.7;
+		}
+	</style>
+    <script src="/socket.io/socket.io.js"></script>
+	<script src="https://ajax.googleapis.com/ajax/libs/jquery/2.2.0/jquery.min.js"></script>
+<!--	<script src="https://ajax.googleapis.com/ajax/libs/jqueryui/1.11.4/jquery-ui.min.js"></script> -->
+    <script>
+	var selections = {
+		items: [],
+		owner: null
+	};
+	var cardwidth = 180;
+	var socket;
+	var nickname;
+	var myTurn;
+	function allowDrop(ev) {
+		ev.preventDefault();
+	}
+
+	function dragstart(ev) {
+		var index = $.inArray(ev.target, selections.items);
+		if(index == -1) {
+			select(ev.target);
+		}
+		ev.dataTransfer.setData("src", selections.owner);
+	}
+
+	function addChild(node, elem, index) {
+		if(index == 0) {
+			$(node).prepend(elem);
+		} else {
+			$(node).children().eq(index-1).after(elem);
+		}
+	}
+
+	function drop(ev) {
+		ev.preventDefault();
+		var sourceDiv = ev.dataTransfer.getData("src");
+		var node;
+		if(ev.target instanceof HTMLImageElement) {
+			node = ev.target.parentNode;
+		} else {
+			node = ev.target;
+		}
+		var start = $(node).children('[name=Back]').length;
+		var index = 0;
+		$(node).children('img[name!=Back]').each(function(i) {
+			if(ev.pageX > $(this).offset().left) {
+				index = i+1;
+			}
+		});
+		index = index + start;
+		while(selections.items.length > 0) {
+			addChild(node, selections.items.pop(), index);
+		}
+		selections.owner = null;
+		sortCards(node.id);
+		sortCards(sourceDiv);
+	}
+
+	function sortCards(divId) {
+		numCards = $('#' + divId + ' > img').length;
+		totalwidth = $('#'+divId).width();
+		shiftwidth = (totalwidth-cardwidth) / (numCards-1);
+		if(numCards == 1) {
+			shiftwidth = 0;
+		} else if(numCards*cardwidth < totalwidth) {
+			shiftwidth = cardwidth;
+		}
+		shift = Math.floor(shiftwidth * 100 / cardwidth);
+		$('#' + divId).children('img').each(function(i) {
+			$(this).attr('z-index', i);
+			$(this).css("transform", "translateX("+i*shift+"%)");
+		});
+	}
+
+	function select(element) {
+		index = $.inArray(element, selections.items);
+		if(index == -1) {
+			if((selections.owner && element.parentNode.id == selections.owner)
+					|| !selections.owner) {
+				selections.items.push(element);
+				selections.owner = element.parentNode.id;
+				style = $(element).attr("style");
+				style = style.slice(0, -1) + " translateY(-20px);";
+				$(element).attr("style", style);
+			}
+		} else {
+			selections.items.splice(index, 1);
+			if(selections.items.length == 0) {
+				selections.owner = null;
+			}
+			style = $(element).attr("style");
+			style = style.replace(" translateY(-20px)","");
+			$(element).attr("style", style);
+		}
+	}
+
+	function opencard(elem) {
+		if(myTurn) {
+			var move = {};
+			move["index"] = elem.id;
+			move["player"] = nickname;
+			socket.emit('open card', move);
+			disablePlay();
+		}
+	}
+
+	function disablePlay() {
+		myTurn = false;
+		$('#p').prop("disabled", true);
+		$('#o').prop("disabled", true);
+		nodes = document.getElementsByName("Back");
+		document.getElementById("playarea").ondragover = false;
+	}
+
+	function enablePlay() {
+		myTurn = true;
+		$('#p').prop("disabled", false);
+		$('#o').prop("disabled", false);
+		document.getElementById("playarea").ondragover = allowDrop;
+	}
+
+	$(document).ready(function() {
+		disablePlay();
+		nickname = document.cookie;
+		if(!nickname) {
+			nickname = prompt("Enter you name");
+			document.cookie=nickname;
+		}
+        socket = io();
+		socket.emit('intro', nickname);
+		if(nickname == "mannjani") {
+			$('#s').show();
+		}
+		$('#s').click(function(){
+			socket.emit('start game');
+		});
+
+		$('#b').click(function(){
+			msg = $('#m').val();
+			socket.emit('chat message', "<b>"+nickname+"</b>: "+msg);
+			$('#messages').append($('<li>').html("<b>"+nickname+"</b>: "+msg));
+			$('#messagewindow').scrollTop($('#messagewindow')[0].scrollHeight);
+			$('#m').val('');
+			return false;
+		});
+
+		$('#o').click(function() {
+			socket.emit('pass', nickname);
+			disablePlay();
+			return false;
+		});
+
+		$('#g').click(function() {
+			var rank = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '0', 'J', 'Q', 'K'];
+			children = $('#mycards').children();
+			children = children.sort(function(node1, node2) {
+				return rank.indexOf(node1.id[0]) - rank.indexOf(node2.id[0]);
+			});
+			children.each(function(i, elem) {
+				addChild(document.getElementById('mycards'), elem, i)
+			});
+			sortCards('mycards');
+		});
+
+		$('#p').click(function() {
+			var move = {};
+			var pile = [];
+			$('#playarea').children().each(function(i, elem){
+				if(elem.getAttribute('name') != 'Back') {
+					pile.push(elem.id)
+				}
+			});
+			move["pile"] = pile;
+			move["card"] = $("#playcard").val();
+			move["num"] = pile.length;
+			move["player"] = nickname
+			socket.emit('play', move);
+			disablePlay();
+			return false;
+		});
+
+		socket.on('chat message', function(msg) {
+			$('#messages').append($('<li>').html(msg));
+			$('#messagewindow').scrollTop($('#messagewindow')[0].scrollHeight);
+		});
+
+		socket.on('get pile', function(pile) {
+			$('#mycards').empty();
+			totalwidth = $('#mycards').width();
+			for(i = 0; i < pile.length; i++) {
+				src = "static/"+pile[i]+".png";
+				var img = $('<img />', {
+					id: pile[i],
+					src: src,
+					height: '250px',
+					draggable: "true",
+					ondragstart:"dragstart(event)",
+					onclick: "select(this)",
+				});
+				$("#mycards").append(img);
+				shiftwidth = (totalwidth-cardwidth) / (pile.length-1);
+				shift = Math.floor(shiftwidth * 100 / cardwidth);
+				img.attr('z-index', i);
+				img.css("transform", "translateX("+i*shift+"%)");
+			}
+		});
+
+		socket.on('command', function(cmd, data) {
+			if(cmd == 'move accepted') {
+				$('#playarea').empty();
+			} else if(cmd == 'your move') {
+				enablePlay();
+			} else if(cmd == 'current status') {
+				$("#playarea").empty();
+				totalwidth = $('#playarea').width();
+				for(i = 0; i < data; i++) {
+					src = "static/B1.gif";
+					var img = $('<img />', {
+						id: i,
+						name: "Back",
+						src: src,
+						height: '250px',
+						onclick: "opencard(this)",
+					});
+					$("#playarea").append(img);
+					shiftwidth = (totalwidth-cardwidth) / (data-1);
+					shift = Math.floor(shiftwidth * 100 / cardwidth);
+					img.attr('z-index', i);
+					img.css("transform", "translateX("+i*shift+"%)");
+				}
+			} else if(cmd == 'opened') {
+				$('#'+data.from).fadeOut(500, function() {
+					$(this).attr("src", "static/"+data.to+".png");
+					$(this).fadeIn(500);
+				});
+			}
+		});
+	});
+    </script>
+</head>
+
+<body>
+	<button id='s' style="display:none;">Start Game</button>
+	<div id="playarea" ondrop="drop(event)" ondragover="allowDrop(event)">
+	</div>
+	<button id="g">Sort Your Cards</button>
+	<button id="o">Pass</button>
+	<div id="self">
+	<div id="chatwindow">
+		<form action="">
+			<select style="width: 145px" id="playcard">
+				<option value=A>Aces</option>
+				<option value=2>Twos</option>
+				<option value=3>Threes</option>
+				<option value=4>Fours</option>
+				<option value=5>Fives</option>
+				<option value=6>Sixes</option>
+				<option value=7>Sevens</option>
+				<option value=8>Eights</option>
+				<option value=9>Nines</option>
+				<option value=0>Tens</option>
+				<option value=J>Jacks</option>
+				<option value=Q>Queens</option>
+				<option value=K>Kings</option>
+			</select>
+			<button id="p" style="width: 95px">Play Move</button>
+		</form>
+		<div id="messagewindow">
+			<ul id="messages">
+			</ul>
+		</div>
+		<div id="inputwindow">
+			<form action="">
+				<input id="m" style="width:100%" autocomplete="off" />
+				<button id='b' style="display:none;">Send</button>
+			</form>
+		</div>
+	</div>
+	<div id='mycards' ondrop="drop(event)" ondragover="allowDrop(event)">
+	</div>
+	</div>
+</body>
+
+</html>
