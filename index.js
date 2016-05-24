@@ -3,7 +3,6 @@ var express = require('express');
 var app = express();
 var http = require('http').Server(app);
 var io = require('socket.io')(http)
-var cards = require('node-of-cards');
 app.use('/static', express.static('Resources'));
 app.get('/', function (req, res) {
 	res.sendFile(__dirname + '/index.html');
